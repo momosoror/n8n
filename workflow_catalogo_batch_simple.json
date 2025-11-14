@@ -1,0 +1,438 @@
+{
+  "name": "📙 Catalogo Smart - Batch AI (SEMPLIFICATO)",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [260, 420],
+      "id": "manual-trigger",
+      "name": "Manual Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "12xobrtNcwYLrUZ-xUUnmxYqUZUVqptRw",
+          "mode": "list",
+          "cachedResultName": "TABELLA COSTI - UBIFY.xlsx"
+        },
+        "options": {}
+      },
+      "id": "download-excel",
+      "name": "Download Excel",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [480, 420],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "K35Zcw4RsFXXFw0J",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {
+          "headerRow": 1
+        }
+      },
+      "id": "parse-excel",
+      "name": "Parse Excel",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [700, 420]
+    },
+    {
+      "parameters": {
+        "batchSize": 15,
+        "options": {}
+      },
+      "id": "batch-rows",
+      "name": "Batch Rows (15 per batch)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [920, 420]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "aggregate-batch",
+              "name": "batchRows",
+              "type": "array",
+              "value": "={{ $input.all().map((item, idx) => ({ \n  rowIndex: idx + 1,\n  MACRO: item.json.MACRO || '',\n  DESCRIZIONE: item.json['DESCRIZIONE  COMPLETA                                   '] || item.json['DESCRIZIONE'] || '',\n  UM: item.json['U.M.'] || '',\n  QTA: item.json[\"Q.TA'\"] || '',\n  COSTO: item.json['COSTO UNITAR. MATERIALE'] || '',\n  TEMPO: item.json['Tempo pos min/copp'] || ''\n})) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "aggregate-batch",
+      "name": "Aggregate Batch",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1140, 420]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=🎯 TASK: Analizza questo batch di {{ $json.batchRows.length }} righe Excel e identifica prodotti validi.\n\n📊 BATCH RIGHE:\n```json\n{{ JSON.stringify($json.batchRows, null, 2) }}\n```\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🧠 ISTRUZIONI:\n\n**STEP 1 - ANALIZZA SEQUENZA RIGHE:**\n\nPer ogni riga nel batch:\n1. Identifica se è:\n   - **CATEGORIA**: MACRO valorizzato, no U.M., no COSTO → Memorizza categoria corrente\n   - **SERVIZIO**: Descrizione contiene trasporto/demolizione/nolo/smaltimento → SKIP\n   - **RIGA VUOTA**: Tutti campi vuoti → SKIP\n   - **PRODOTTO COMPLETO**: DESCRIZIONE + U.M. + COSTO valorizzati\n   - **PRODOTTO INCOMPLETO**: DESCRIZIONE + U.M. ma no COSTO\n\n2. Se PRODOTTO INCOMPLETO:\n   - Guarda riga successiva nel batch\n   - Se riga successiva ha COSTO/TEMPO ma no DESCRIZIONE → **MERGE**\n   - Altrimenti → Passa prodotto incompleto con warning\n\n3. Tracking categoria:\n   - Quando trovi categoria, applicala a righe successive senza MACRO\n\n**STEP 2 - OUTPUT PRODOTTI:**\n\nRestituisci array JSON con SOLO prodotti validi (no categorie, no servizi).\n\nPer ogni prodotto:\n```json\n{\n  \"rowIndex\": [numero riga originale],\n  \"categoria_macro\": \"[MACRO o categoria corrente]\",\n  \"categoria_catalogo\": \"[dedotta da descrizione: Interruttori, Cavi, Quadri, ecc.]\",\n  \"descrizione_prodotto\": \"[nome breve normalizzato max 60 char]\",\n  \"descrizione_completa\": \"[categoria + dettagli tecnici]\",\n  \"id_prodotto_rilevato\": \"[codice se trovato nella descrizione, altrimenti vuoto]\",\n  \"unita_misura\": \"[U.M.]\",\n  \"costo_materiale_unitario\": [numero punto decimale],\n  \"minuti_manodopera_unitari\": [numero intero],\n  \"descrizione_originale\": \"[DESCRIZIONE originale]\",\n  \"merged_from_rows\": [array indici se merge, altrimenti [rowIndex]],\n  \"preventivo_fonte\": \"Preventivo importato\"\n}\n```\n\n**STEP 3 - RESPONSE FORMAT:**\n\nRispondi con:\n```json\n{\n  \"products\": [\n    {prodotto1},\n    {prodotto2},\n    ...\n  ],\n  \"skipped\": [\n    {\"rowIndex\": N, \"reason\": \"categoria\"},\n    {\"rowIndex\": M, \"reason\": \"servizio: trasporto\"}\n  ],\n  \"stats\": {\n    \"total_rows\": {{ $json.batchRows.length }},\n    \"products_found\": X,\n    \"merged_rows\": Y,\n    \"skipped\": Z\n  }\n}\n```\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⚠️ **REGOLE CRITICHE:**\n1. Analizza righe in sequenza (importante per merge e categoria tracking)\n2. Merge SOLO se riga successiva ha dati mancanti dalla corrente\n3. Categoria si propaga fino a nuova categoria\n4. Numeri: usa punto decimale, null per mancanti\n5. Solo JSON valido, nessun testo extra\n\n**ESEMPI MERGE:**\n\n```\nRiga 5: {DESCRIZIONE: \"Interruttore C16\", UM: \"cad\", COSTO: \"\"}\nRiga 6: {DESCRIZIONE: \"\", UM: \"\", COSTO: \"28.50\", TEMPO: \"20\"}\n→ MERGE in 1 prodotto con merged_from_rows: [5, 6]\n\nRiga 10: {DESCRIZIONE: \"Cavo FG7\", UM: \"ml\", COSTO: \"2.80\"}\nRiga 11: {DESCRIZIONE: \"Trasporto\", UM: \"cad\", COSTO: \"150\"}\n→ NO MERGE, sono 2 righe separate (riga 11 è servizio da skippare)\n```",
+        "options": {
+          "systemMessage": "Sei un esperto di analisi preventivi Excel per impianti elettrici. Analizzi batch di righe, identifichi prodotti, consolidi righe multiple, e tracki categorie. Rispondi SOLO con JSON valido."
+        }
+      },
+      "id": "ai-batch-processor",
+      "name": "AI Batch Processor",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [1360, 420]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "options": {
+          "temperature": 0.1,
+          "maxTokens": 2000
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [1360, 620],
+      "id": "openai-mini-batch",
+      "name": "OpenAI GPT-4o-mini",
+      "credentials": {
+        "openAiApi": {
+          "id": "VOCQYCxaByUhfj1p",
+          "name": "m.soror"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "parse-batch-json",
+              "name": "batchResult",
+              "type": "object",
+              "value": "={{ JSON.parse($json.output.replace(/```json\\n?/g, '').replace(/```/g, '').trim()) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "extract-batch-json",
+      "name": "Extract Batch JSON",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1580, 420]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "batchResult.products",
+        "options": {}
+      },
+      "id": "split-products",
+      "name": "Split Products Array",
+      "type": "n8n-nodes-base.itemLists",
+      "typeVersion": 3.4,
+      "position": [1800, 420]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "flatten-product",
+              "name": "categoria_macro",
+              "type": "string",
+              "value": "={{ $json.categoria_macro }}"
+            },
+            {
+              "id": "categoria_catalogo",
+              "name": "categoria_catalogo",
+              "type": "string",
+              "value": "={{ $json.categoria_catalogo }}"
+            },
+            {
+              "id": "descrizione_prodotto",
+              "name": "descrizione_prodotto",
+              "type": "string",
+              "value": "={{ $json.descrizione_prodotto }}"
+            },
+            {
+              "id": "descrizione_completa",
+              "name": "descrizione_completa",
+              "type": "string",
+              "value": "={{ $json.descrizione_completa }}"
+            },
+            {
+              "id": "id_prodotto_rilevato",
+              "name": "id_prodotto_rilevato",
+              "type": "string",
+              "value": "={{ $json.id_prodotto_rilevato }}"
+            },
+            {
+              "id": "unita_misura",
+              "name": "unita_misura",
+              "type": "string",
+              "value": "={{ $json.unita_misura }}"
+            },
+            {
+              "id": "costo_materiale_unitario",
+              "name": "costo_materiale_unitario",
+              "type": "number",
+              "value": "={{ $json.costo_materiale_unitario }}"
+            },
+            {
+              "id": "minuti_manodopera_unitari",
+              "name": "minuti_manodopera_unitari",
+              "type": "number",
+              "value": "={{ $json.minuti_manodopera_unitari }}"
+            },
+            {
+              "id": "preventivo_fonte",
+              "name": "preventivo_fonte",
+              "type": "string",
+              "value": "={{ $json.preventivo_fonte }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "flatten-products",
+      "name": "Flatten Products",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2020, 420]
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      },
+      "id": "loop-catalog-batch",
+      "name": "Loop Catalog Batch",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [2240, 420]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=🎯 TASK: Integra prodotto in catalogo con semantic matching.\n\n📦 PRODOTTO:\n• ID: {{ $json.id_prodotto_rilevato || 'N/A' }}\n• Categoria: {{ $json.categoria_catalogo }}\n• Nome: {{ $json.descrizione_prodotto }}\n• Descrizione: {{ $json.descrizione_completa }}\n• U.M.: {{ $json.unita_misura }}\n• Costo: {{ $json.costo_materiale_unitario }}€\n• Minuti: {{ $json.minuti_manodopera_unitari }}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n**STEP 1 - CERCA:**\nUsa \"Catalogo READ\" per prodotti simili (>75% similarità O stesso ID).\n\n**STEP 2A - MATCH → UPDATE:**\nUsa \"Catalogo UPDATE\":\n- Unisci descrizioni (aggiungi nuovi dettagli)\n- Aggiorna costo/minuti se diversi\n- Mantieni ID esistente\n\nRispondi: `{\"action\": \"updated\", \"product_id\": \"...\", \"similarity\": 75-100}`\n\n**STEP 2B - NESSUN MATCH → CREATE:**\nUsa \"Catalogo APPEND\":\n- ID: {{ $json.id_prodotto_rilevato }} o genera \"[CAT]_NNN\"\n- Tutti campi completi\n\nRispondi: `{\"action\": \"created\", \"product_id\": \"...\"}`\n\n⚠️ Usa tools, no duplicati, JSON valido",
+        "options": {
+          "systemMessage": "Esperto cataloghi. Semantic matching e integrazione prodotti. Output: JSON azione eseguita."
+        }
+      },
+      "id": "ai-catalog-manager",
+      "name": "AI Catalog Manager",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [2460, 420]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "options": {
+          "temperature": 0.2,
+          "maxTokens": 1000
+        }
+      },
+      "id": "openai-mini-catalog",
+      "name": "OpenAI GPT-4o-mini Catalog",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [2460, 620],
+      "credentials": {
+        "openAiApi": {
+          "id": "VOCQYCxaByUhfj1p",
+          "name": "m.soror"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1Rg0oVT04mG4oy2OhgiYDNZVhSCLTyBFgVKdODIyQIEM",
+          "mode": "list",
+          "cachedResultName": "catalogo"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Foglio1"
+        },
+        "options": {}
+      },
+      "id": "tool-read",
+      "name": "Catalogo READ",
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [2360, 620],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "h1BcUaWWp8da2DsY",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1Rg0oVT04mG4oy2OhgiYDNZVhSCLTyBFgVKdODIyQIEM",
+          "mode": "list",
+          "cachedResultName": "catalogo"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Foglio1"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": ["id_prodotto"],
+          "schema": [
+            {"id": "id_prodotto", "displayName": "id_prodotto", "type": "string", "canBeUsedToMatch": true, "defaultMatch": true},
+            {"id": "description", "displayName": "description", "type": "string"},
+            {"id": "category", "displayName": "category", "type": "string"},
+            {"id": "unita_misura", "displayName": "unita_misura", "type": "string"},
+            {"id": "costo_materiale_unitario", "displayName": "costo_materiale_unitario", "type": "number"},
+            {"id": "minuti_manodopera_unitari", "displayName": "minuti_manodopera_unitari", "type": "number"},
+            {"id": "Tempo pos min/copp", "displayName": "Tempo pos min/copp", "type": "number"}
+          ]
+        },
+        "options": {}
+      },
+      "id": "tool-update",
+      "name": "Catalogo UPDATE",
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [2560, 620],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "h1BcUaWWp8da2DsY",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1Rg0oVT04mG4oy2OhgiYDNZVhSCLTyBFgVKdODIyQIEM",
+          "mode": "list",
+          "cachedResultName": "catalogo"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Foglio1"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "schema": [
+            {"id": "id_prodotto", "displayName": "id_prodotto", "type": "string"},
+            {"id": "description", "displayName": "description", "type": "string"},
+            {"id": "category", "displayName": "category", "type": "string"},
+            {"id": "unita_misura", "displayName": "unita_misura", "type": "string"},
+            {"id": "costo_materiale_unitario", "displayName": "costo_materiale_unitario", "type": "number"},
+            {"id": "minuti_manodopera_unitari", "displayName": "minuti_manodopera_unitari", "type": "number"},
+            {"id": "Tempo pos min/copp", "displayName": "Tempo pos min/copp", "type": "number"}
+          ]
+        },
+        "options": {}
+      },
+      "id": "tool-append",
+      "name": "Catalogo APPEND",
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [2760, 620],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "h1BcUaWWp8da2DsY",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [[{"node": "Download Excel", "type": "main", "index": 0}]]
+    },
+    "Download Excel": {
+      "main": [[{"node": "Parse Excel", "type": "main", "index": 0}]]
+    },
+    "Parse Excel": {
+      "main": [[{"node": "Batch Rows (15 per batch)", "type": "main", "index": 0}]]
+    },
+    "Batch Rows (15 per batch)": {
+      "main": [null, [{"node": "Aggregate Batch", "type": "main", "index": 0}]]
+    },
+    "Aggregate Batch": {
+      "main": [[{"node": "AI Batch Processor", "type": "main", "index": 0}]]
+    },
+    "AI Batch Processor": {
+      "main": [[{"node": "Extract Batch JSON", "type": "main", "index": 0}]]
+    },
+    "OpenAI GPT-4o-mini": {
+      "ai_languageModel": [[{"node": "AI Batch Processor", "type": "ai_languageModel", "index": 0}]]
+    },
+    "Extract Batch JSON": {
+      "main": [[{"node": "Split Products Array", "type": "main", "index": 0}]]
+    },
+    "Split Products Array": {
+      "main": [[{"node": "Flatten Products", "type": "main", "index": 0}]]
+    },
+    "Flatten Products": {
+      "main": [[{"node": "Loop Catalog Batch", "type": "main", "index": 0}]]
+    },
+    "Loop Catalog Batch": {
+      "main": [null, [{"node": "AI Catalog Manager", "type": "main", "index": 0}]]
+    },
+    "AI Catalog Manager": {
+      "main": [[{"node": "Loop Catalog Batch", "type": "main", "index": 0}], [{"node": "Batch Rows (15 per batch)", "type": "main", "index": 0}]]
+    },
+    "OpenAI GPT-4o-mini Catalog": {
+      "ai_languageModel": [[{"node": "AI Catalog Manager", "type": "ai_languageModel", "index": 0}]]
+    },
+    "Catalogo READ": {
+      "ai_tool": [[{"node": "AI Catalog Manager", "type": "ai_tool", "index": 0}]]
+    },
+    "Catalogo UPDATE": {
+      "ai_tool": [[{"node": "AI Catalog Manager", "type": "ai_tool", "index": 0}]]
+    },
+    "Catalogo APPEND": {
+      "ai_tool": [[{"node": "AI Catalog Manager", "type": "ai_tool", "index": 0}]]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
