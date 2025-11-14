@@ -14,10 +14,14 @@ Sistema automatizzato per creare e mantenere un catalogo prodotti di impianti el
 
 ```
 /home/user/n8n/
-├── workflow_catalogo_improved.json       # ⭐ Versione BASE (consigliata per iniziare)
-├── workflow_catalogo_advanced.json       # 🚀 Versione ADVANCED (gestisce righe multiple)
-├── WORKFLOW_GUIDE.md                     # 📘 Guida completa versione base
-├── ADVANCED_VERSION_GUIDE.md             # 📗 Guida versione advanced
+├── workflow_catalogo_improved.json       # Versione BASE (Excel semplici)
+├── workflow_catalogo_advanced.json       # Versione ADVANCED (con 1 Code node - ⚠️ errore "trim")
+├── workflow_catalogo_ai_consolidator.json # ⭐ Versione FULL AI (CONSIGLIATA - zero Code nodes)
+├── code_node_fixed.js                    # Fix per errore ADVANCED
+├── WORKFLOW_GUIDE.md                     # 📘 Guida versione BASE
+├── ADVANCED_VERSION_GUIDE.md             # 📗 Guida versione ADVANCED
+├── FULL_AI_VERSION_GUIDE.md              # 🎯 Guida versione FULL AI (dettagliata)
+├── QUALE_VERSIONE_SCEGLIERE.md           # 🤔 Guida scelta versione
 ├── workflow_analysis.md                  # 🔍 Analisi problemi workflow originale
 └── README_WORKFLOW_CATALOGO.md           # 📄 Questo file
 ```
@@ -26,23 +30,40 @@ Sistema automatizzato per creare e mantenere un catalogo prodotti di impianti el
 
 ## 🚀 Quick Start
 
+### ⚡ Scelta Rapida Versione
+
+- **Excel con righe multiple / Hai errore "trim not function"** → Usa **FULL AI** ⭐
+- **Excel semplice (1 riga = 1 prodotto)** → Usa **BASE**
+- **Leggi guida completa** → Vedi `QUALE_VERSIONE_SCEGLIERE.md`
+
 ### 1. Importa Workflow in n8n
 
-**Opzione A: Versione BASE (consigliata)**
+**Opzione A: Versione FULL AI** ⭐ **CONSIGLIATA per la maggior parte dei casi**
+```bash
+1. Apri n8n
+2. Click "+" → "Import from file"
+3. Seleziona: workflow_catalogo_ai_consolidator.json
+4. Conferma import
+```
+✅ Zero Code nodes | ✅ Gestisce righe multiple | ✅ Mai errori "trim"
+
+**Opzione B: Versione BASE (Excel semplici)**
 ```bash
 1. Apri n8n
 2. Click "+" → "Import from file"
 3. Seleziona: workflow_catalogo_improved.json
 4. Conferma import
 ```
+✅ Veloce | ✅ Economico | ❌ No righe multiple
 
-**Opzione B: Versione ADVANCED (se hai righe multiple)**
+**Opzione C: Versione ADVANCED (solo se serve velocità massima)**
 ```bash
 1. Apri n8n
 2. Click "+" → "Import from file"
 3. Seleziona: workflow_catalogo_advanced.json
-4. Conferma import
+4. ⚠️ Se hai errore "trim": usa fix in code_node_fixed.js
 ```
+⚡ Velocissimo | ⚠️ 1 Code node (possibili errori)
 
 ### 2. Configura Credenziali
 
